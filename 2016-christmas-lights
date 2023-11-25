@@ -1,0 +1,701 @@
+#include<FastLED.h>
+
+#define NUM_MODES 12
+#define LIGHT_TEST 0
+
+#define MAX_BRIGHT 150
+
+byte state = 1;
+int index = 0;               //-LED INDEX (0 to LED_COUNT-1)
+
+byte thisbright = 128;
+byte thissat = 255;
+int thisdelay = 20;          
+byte thisstep = 10;           
+byte thishue = 0;
+
+byte demoMode = 0;
+#define DEMO_COUNT 1600;
+int demoStateCountdown;
+byte interrupt = 0;
+
+// How many leds are in the strip?
+// Be careful with the num leds. The animations that make use of the levels
+// will walk right off the led array. The numbers are specific to my led 
+// tree. If you are using less leds or are not interested in the layer animations
+// you should remove them from the loop or set USE_LEVEL_ANIMATIONS to 0
+//#define NUM_LEDS 30 // LED Strip
+//#define LED_TYPE    WS2812B // LED Strip
+//#define COLOR_ORDER GRB // LED Strip
+#define NUM_LEDS 250 // Tree
+#define LED_TYPE    WS2811 // Tree
+#define COLOR_ORDER RGB // Tree
+
+byte USE_LEVEL_ANIMATIONS = 1; // if 1, will auto advance past level animations
+#define NUM_LEVELS 12
+const PROGMEM uint16_t levels[NUM_LEVELS] = {58, 108, 149, 187, 224, 264, 292, 309, 321, 327, 336, 348};
+
+// Data pin that led data will be written out over
+#define DATA_PIN 2
+// This is an array of leds.  One item for each led in your strip.
+CRGB leds[NUM_LEDS];
+
+/////////////////////////////////////////////////////////////////////////
+// Setup for danger shield
+//
+// I used the Danger Shield to play with animation speed, brightness and for initial
+// debug. I used it to lock the animation on one type, showed the animation
+// number in the LED, etc. I wrote the code to use it or not.
+/////////////////////////////////////////////////////////////////////////
+
+byte useDSCtrl = 0; // Set to 1 if you want to play with the Danger Shield
+
+// Shift register bit values to display 0-9 on the seven-segment display
+const PROGMEM unsigned char ledCharSet[20] = {
+  B00111111,B00000110,B01011011,B01001111,B01100110,B01101101,B01111101,B00000111,B01111111,B01101111,
+  B10111111,B10000110,B11011011,B11001111,B11100110,B11101101,B11111101,B10000111,B11111111,B11101111
+};
+
+// Pin definitions
+#define SLIDER1  0
+#define SLIDER2  1
+#define SLIDER3  2
+
+#define DATA 4
+#define LED1  5
+#define LED2  6
+#define LATCH 7
+#define CLOCK 8
+#define BUTTON1  10
+#define BUTTON2  11
+#define BUTTON3  12
+
+/////////////////////////////////////////////////////////////////////////
+// End setup for danger shield
+/////////////////////////////////////////////////////////////////////////
+
+void setup() 
+{
+  // sanity check delay - allows reprogramming if accidently blowing power w/leds
+  delay(2000);
+  
+  initDSCtrls();
+
+  FastLED.addLeds<LED_TYPE, DATA_PIN, COLOR_ORDER>(leds, NUM_LEDS);
+  FastLED.setBrightness(MAX_BRIGHT);
+  one_color_all(0,0,0);
+  FastLED.show();
+  delay(1000);
+  countdown();
+  setDemoMode();
+}
+
+static void initDSCtrls()
+{
+  if (!useDSCtrl) return;
+  
+  // Init LED 1
+  pinMode(LED1, OUTPUT);
+  blinkLED1();
+  
+  // Init LED 2
+  pinMode(LED2, OUTPUT);
+  digitalWrite(LED2,LOW);
+  
+  // Init Digit Display
+  pinMode(LATCH, OUTPUT);
+  pinMode(CLOCK, OUTPUT);
+  pinMode(DATA,OUTPUT);
+  
+  // Init buttons
+  pinMode(BUTTON1,INPUT);
+  pinMode(BUTTON2,INPUT);
+  pinMode(BUTTON3,INPUT);
+  
+  digitalWrite(BUTTON1,HIGH);
+  digitalWrite(BUTTON2,HIGH);
+  digitalWrite(BUTTON3,HIGH);
+}
+
+void blinkLED1()
+{
+  if (!useDSCtrl) return;
+
+  digitalWrite(LED1, LOW);
+  delay(50);
+  for (int idx = 0; idx < 3; idx++)
+  {
+    digitalWrite(LED1, HIGH);
+    delay(50);
+    digitalWrite(LED1, LOW);
+    delay(50);
+  }
+}
+
+void countdown()
+{
+  if (!useDSCtrl) return;
+
+  for (int index=3; index >= 0; index--)
+  {
+    state = index;
+    updateState();
+    delay(1000);
+  }
+  state = 1;
+  updateState();
+}
+
+void one_color_all(int cred, int cgrn, int cblu) 
+{       //-SET ALL LEDS TO ONE COLOR
+    for(int i = 0 ; i < NUM_LEDS; i++ ) {
+      leds[i].setRGB( cred, cgrn, cblu).nscale8_video(thisbright);
+    }
+}
+
+void colorTest()
+{
+  one_color_all(0,0,0);
+  FastLED.show();
+  delay(1000);
+  one_color_all(255,0,0);
+  FastLED.show();
+  delay(1000);
+  one_color_all(0,0,0);
+  FastLED.show();
+  delay(1000);
+  one_color_all(0,255,0);
+  FastLED.show();
+  delay(1000);
+  one_color_all(0,0,0);
+  FastLED.show();
+  delay(1000);
+  one_color_all(0,0,255);
+  FastLED.show();
+  delay(1000);
+}  
+
+void dotTest()
+{
+   // Move a single white led 
+   for(int whiteLed = 0; whiteLed < NUM_LEDS; whiteLed = whiteLed + 1) {
+      // Turn our current led on to white, then show the leds
+      leds[whiteLed] = CRGB::White;
+      // Show the leds (only one of which is set to white, from above)
+      FastLED.show();
+      // Wait a little bit
+      delay(10);
+      // Turn our current led back to black for the next loop around
+      leds[whiteLed] = CRGB::Black;
+   }
+}
+
+void lightTest()
+{
+  colorTest();
+  dotTest();
+}
+
+void random_burst() 
+{
+  int rndidx = random16(0, NUM_LEDS);
+  int rndhue = random8(0, 255);  
+  int rndbright = random8(10, thisbright);
+  leds[rndidx] = CHSV(rndhue, thissat, rndbright);
+  delay(random8(0, thisdelay));
+}
+
+void rgb_propeller() 
+{
+  thishue = 0;
+  index++;
+  int ghue = (thishue + 80) % 255;
+  int bhue = (thishue + 160) % 255;
+  int N3  = int(NUM_LEDS/3);
+  int N6  = int(NUM_LEDS/6);  
+  int N12 = int(NUM_LEDS/12);  
+  for(int i = 0; i < N3; i++ ) {
+    int j0 = (index + i + NUM_LEDS - N12) % NUM_LEDS;
+    int j1 = (j0+N3) % NUM_LEDS;
+    int j2 = (j1+N3) % NUM_LEDS;    
+    leds[j0] = CHSV(thishue, thissat, thisbright);
+    leds[j1] = CHSV(ghue, thissat, thisbright);
+    leds[j2] = CHSV(bhue, thissat, thisbright);    
+  }
+}
+
+void candycane() 
+{
+  index++;
+  int N3  = int(NUM_LEDS/3);
+  int N6  = int(NUM_LEDS/6);  
+  int N12 = int(NUM_LEDS/12);  
+  for(int i = 0; i < N6; i++ ) {
+    int j0 = (index + i + NUM_LEDS - N12) % NUM_LEDS;
+    int j1 = (j0+N6) % NUM_LEDS;
+    int j2 = (j1+N6) % NUM_LEDS;
+    int j3 = (j2+N6) % NUM_LEDS;
+    int j4 = (j3+N6) % NUM_LEDS;
+    int j5 = (j4+N6) % NUM_LEDS;
+    leds[j0] = CRGB(255, 255, 255).nscale8_video(thisbright*.75);
+    leds[j1] = CRGB(255, 0, 0).nscale8_video(thisbright);
+    leds[j2] = CRGB(255, 255, 255).nscale8_video(thisbright*.75);
+    leds[j3] = CRGB(255, 0, 0).nscale8_video(thisbright);
+    leds[j4] = CRGB(255, 255, 255).nscale8_video(thisbright*.75);
+    leds[j5] = CRGB(255, 0, 0).nscale8_video(thisbright);
+  }
+}
+
+void rainbow_loop() 
+{
+  index++;
+  thishue = thishue + thisstep;
+  if (index >= NUM_LEDS) {index = 0;}
+  if (thishue > 255) {thishue = 0;}
+  leds[index] = CHSV(thishue, thissat, thisbright);
+}
+
+void fill_rainbow_ctrl( struct CRGB * pFirstLED, int numToFill,
+                  uint8_t initialhue,
+                  uint8_t deltahue,
+      uint8_t saturation,
+      uint8_t brightness)
+{
+    CHSV hsv;
+    hsv.hue = initialhue;
+    hsv.sat = saturation;
+    hsv.val = brightness;
+    for( int i = 0; i < numToFill; i++) {
+        hsv2rgb_rainbow( hsv, pFirstLED[i]);
+        hsv.hue += deltahue;
+    }
+}
+
+void rainbow()
+{
+  fill_rainbow_ctrl( leds, NUM_LEDS, thishue, thisstep, thissat, thisbright);
+  thishue++;
+}
+
+void clear_all()
+{
+  one_color_all(0, 0, 0);
+  LEDS.show();
+  delay(50);
+}
+
+void clear_level(int level)
+{
+  int startPxl;
+  if (level == 0)
+    startPxl = 0;
+  else
+    startPxl = pgm_read_word(&(levels[level-1]));
+
+  for(int i = startPxl; i < pgm_read_word(&(levels[level])); i++)
+  {
+    leds[i] = CRGB::Black;
+  }
+}
+
+void light_level_random(int level, byte clearall = 1)
+{
+  if (clearall)
+    clear_all();
+  
+  int startPxl;
+  if (level == 0)
+    startPxl = 0;
+  else
+    startPxl = pgm_read_word(&(levels[level-1]));
+    
+  for(int i = startPxl; i < pgm_read_word(&(levels[level])); i++)
+  {
+    leds[i] = CHSV(random8(), random8(50, thissat), random8(50, thisbright));
+  }
+}
+
+void quick_random_fill()
+{
+  for (int i = 0; i < NUM_LEDS; i++)
+  {
+    leds[i] = CHSV(random8(), random8(), random8(10, thisbright));
+  }
+}
+
+void light_level(int level, byte red, byte green, byte blue, byte clearall = 1)
+{
+  if (clearall)
+    clear_all();
+  
+  int startPxl;
+  if (level == 0)
+    startPxl = 0;
+  else
+    startPxl = pgm_read_word(&(levels[level-1]));
+
+  for(int i = startPxl; i < pgm_read_word(&(levels[level])); i++)
+  {
+    leds[i].setRGB(red, green, blue).nscale8_video(thisbright);
+  }
+}
+
+void drain()
+{
+  for (int pancakeLevel = 0; pancakeLevel < NUM_LEVELS; pancakeLevel++)
+  {
+    updateControlVars();    
+    if (interrupt) return;
+    for (int level = pancakeLevel; level >= 0; level--)
+    {
+      updateControlVars();    
+      if (interrupt) return;
+      clear_level(level);
+      if (level >= 1) light_level_random(level-1, 0);
+            
+      LEDS.show();
+      delay(75);
+    }
+  }
+}
+
+void pancake()
+{
+  for (int pancakeLevel = 0; pancakeLevel < NUM_LEVELS; pancakeLevel++)
+  {
+    updateControlVars();    
+    if (interrupt) return;
+    for (int level = NUM_LEVELS-1; level >= pancakeLevel; level--)
+    {
+      updateControlVars();    
+      if (interrupt) return;
+      if (level < NUM_LEVELS-1) clear_level(level+1);
+      light_level_random(level, 0);
+            
+      LEDS.show();
+      delay(75);
+    }
+  }
+}
+
+void alternate_levels()
+{
+  static int level = 0;
+  light_level(level, dim8_video(random8()), dim8_video(random8()), dim8_video(random8()));
+  level++;
+  if (level == NUM_LEVELS) level = 0;
+}
+
+void random_levels()
+{
+  int level = random(NUM_LEVELS);
+  if (NUM_LEVELS == level) level = 0;
+  light_level_random(level, 1);
+}
+
+void rainbow_fade() 
+{
+    thishue++;
+    if (thishue > 255) {thishue = 0;}
+    for(int idex = 0 ; idex < NUM_LEDS; idex++ ) {
+      leds[idex] = CHSV(thishue, thissat, thisbright);
+    }
+}
+
+void twinkle( CRGB* L ) {
+  static byte huebase = 0;
+  
+  //slowly rotate huebase
+  if( random8(4) == 0) huebase--;
+
+  for( int whichPixel = 0; whichPixel < NUM_LEDS; whichPixel++) {  
+    int hue = random8(32) + huebase;
+    int saturation = 255;    // richest color
+    int brightness = dim8_video( dim8_video( dim8_video( random8())));
+    
+    L[whichPixel] = CHSV( hue, saturation, brightness);
+  }
+}
+
+void matrix() 
+{
+  int rand = random8(0, 100);
+  if (rand > 90) {
+    leds[0] = CHSV(random8(), thissat, thisbright);
+  }
+  else {
+    leds[0] = CHSV(0, thissat, 0);
+  }
+
+  for(int i = NUM_LEDS-1; i > 0; i--) 
+  {
+    leds[i] = leds[i-1];
+  }
+}
+
+void correct_color_balance()
+{
+  for( int i = 0; i < NUM_LEDS; i++) {
+    leds[i].g = scale8_video( leds[i].g, 192);
+  }
+}
+
+
+CHSV sv_ramp( uint8_t hue, uint8_t ramp) {
+  uint8_t brightness;
+  uint8_t saturation;
+  if( ramp < 128) {
+    // fade toward black
+    brightness = ramp * 2;
+    brightness = dim8_video( brightness);
+//    uint8_t global_brightness = FastLED.getBrightness();
+//    uint8_t min_step = 256 / global_brightness;
+//    brightness = qadd8( min_step * 16, brightness);
+    saturation = 255;
+  } else {
+    // desaturate toward white
+    brightness = 255;
+    saturation = 255 - ((ramp - 128) * 2);
+    saturation = 255 - dim8_video( 255 - saturation);
+  }
+  return CHSV( hue, saturation, brightness); }
+
+void loop5( CRGB* L )
+{
+  uint8_t GB = FastLED.getBrightness();
+  uint8_t boost = 0;
+//  if( GB < 65) boost += 8;
+//  if( GB < 33) boost += 8;
+  
+  uint8_t N = 2;
+  
+  static uint16_t starttheta = 0;
+  starttheta += 100 / N;
+
+  static uint16_t starthue16 = 0;
+  starthue16 += 20 / N;
+  
+
+  uint16_t hue16 = starthue16;
+  uint16_t theta = starttheta;
+  for( int i = 0; i < NUM_LEDS; i++) {
+    uint8_t frac = (sin16( theta) + 32768) / 256;
+    frac = scale8(frac,160) + 32;
+    theta += 3700;
+
+    hue16 += 2000;
+    uint8_t hue = hue16 / 256;
+    L[i] = sv_ramp( hue, frac + boost);
+  }
+}
+
+//---FIND ADJACENT INDEX CLOCKWISE
+int adjacent_cw(int i) {
+  int r;
+  if (i < NUM_LEDS - 1) {r = i + 1;}
+  else {r = 0;}
+  return r;
+}
+
+//---FIND ADJACENT INDEX COUNTER-CLOCKWISE
+int adjacent_ccw(int i) {
+  int r;
+  if (i > 0) {r = i - 1;}
+  else {r = NUM_LEDS - 1;}
+  return r;
+}
+
+void random_march() 
+{
+  int iCCW;
+  for(int idex = 0; idex < NUM_LEDS; idex++ ) {
+    iCCW = adjacent_ccw(idex);
+    leds[idex] = leds[idex+1];
+  }
+  leds[NUM_LEDS-1] = CHSV(random8(), thissat, thisbright);
+}
+
+void updateState()
+{
+  if (!useDSCtrl) return;
+
+  if (interrupt)
+  {
+    interrupt = 0;
+  }
+  
+  // Numeric display
+  digitalWrite(LATCH,LOW);
+  shiftOut(DATA,CLOCK,MSBFIRST,~(pgm_read_word(&(ledCharSet[state]))));
+  digitalWrite(LATCH,HIGH);
+  // Reset LED1
+  digitalWrite(LED1, LOW);
+}
+
+void incrementState()
+{
+  state++;
+  if(state > NUM_MODES){ 
+    state = 1; 
+  }
+}
+
+void readForStateChange()
+{
+  if (!useDSCtrl) return;
+
+  if(!(digitalRead(BUTTON1))) // Change state
+  {
+    delay(1); // Debounce
+    incrementState();
+    interrupt = 1;
+    while(!(digitalRead(BUTTON1)));
+  }
+}
+
+void readForInterrupt()
+{
+  if(!(digitalRead(BUTTON2))) // Change state
+  {
+    delay(1); // Debounce
+    interrupt = 1;
+    demoMode = 0;
+    digitalWrite(LED1,HIGH);
+    digitalWrite(LED2,LOW);
+  }
+}
+
+void setDemoMode()
+{
+    demoMode = 1;
+    demoStateCountdown = DEMO_COUNT;
+    digitalWrite(LED2,HIGH);
+}
+
+void readForDemo()
+{
+  if(!(digitalRead(BUTTON3))) // Change state
+  {
+    delay(1); // Debounce
+    setDemoMode();
+  }
+}
+
+void updateControlVars()
+{
+  if (useDSCtrl)
+  {
+    int s1Val = analogRead(SLIDER1);
+    int s2Val = analogRead(SLIDER2);
+    int s3Val = analogRead(SLIDER3);
+    
+    thissat = (s2Val/4 < 50) ? 50 : s2Val/4;
+    thisdelay = s3Val*2;
+    thisbright = (s1Val/4 < 20) ? 20 : s1Val/4;
+
+    readForStateChange();
+    readForInterrupt();
+    readForDemo();
+  }
+  else
+  {
+  }
+}
+
+byte alt = 0;
+void loop() {
+  if (LIGHT_TEST)
+  {
+    lightTest();
+    return;
+  }
+  
+  demoStateCountdown = (demoStateCountdown < 0) ? 0 : demoStateCountdown;
+
+  if (useDSCtrl)
+  {
+    if (alt < 10) {  
+      digitalWrite(LED1, HIGH);
+      alt++;
+    } else {
+      digitalWrite(LED1, LOW);
+      alt++;
+      if (alt == 20) alt=0;
+    }
+  }
+  
+  if (demoMode)
+  {
+    demoStateCountdown--;
+    if (demoStateCountdown <= 0)
+    {
+      blinkLED1();
+      incrementState();
+      demoStateCountdown = DEMO_COUNT;
+    }
+  }
+  
+  updateControlVars();
+  int adjdelay = thisdelay;
+  updateState();
+  
+  switch (state)
+  {
+    case 1:
+      random_burst();
+    break;
+    case 2:
+      rgb_propeller();
+    break;
+    case 3:
+      rainbow();
+    break;
+    case 4:
+      rainbow_fade();
+      if ((demoMode) && !(demoStateCountdown%5)) demoStateCountdown-=2;
+      adjdelay = (adjdelay < 30) ? 30 : adjdelay;
+    break;
+    case 5:
+      rainbow_loop();
+    break;
+    case 6:
+      if ((demoMode) && !(demoStateCountdown%5)) demoStateCountdown-=2;
+      adjdelay = (adjdelay < 50) ? 50 : adjdelay;
+      matrix();
+    break;
+    case 7:
+      demoStateCountdown -= 2;
+      adjdelay = (adjdelay < 120) ? 120 : adjdelay;
+      random_march();
+    break;
+    case 8:
+      loop5(leds);
+      adjdelay = adjdelay/3;
+    break;
+    case 9:
+      twinkle(leds);
+    break;
+    case 10:
+      candycane();
+    break;
+    case 11:
+      if (!USE_LEVEL_ANIMATIONS) incrementState();
+      adjdelay = (adjdelay < 100) ? 100 : adjdelay;
+      demoStateCountdown -= 15;
+      random_levels();
+    break;
+    case 12:
+      if (!USE_LEVEL_ANIMATIONS) incrementState();
+      rainbow();
+      adjdelay = (adjdelay < 50) ? 50 : adjdelay;
+      if (demoMode) demoStateCountdown -= 600;
+      drain();
+      pancake();
+    break;
+    default:
+      random_burst();
+    break;
+  }
+  FastLED.show();  
+  delay(adjdelay);
+}
